@@ -60,23 +60,49 @@ jobs:
             ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=NO \
             build
 
+      
       - name: Package IPA
         run: |
+          set -euo pipefail
+
           APP_PATH="$RUNNER_TEMP/FeatherBuild/Build/Products/Release-iphoneos/Feather.app"
 
-          test -d "$APP_PATH"
+          echo "Checking compiled application..."
+          ls -lah "$RUNNER_TEMP/FeatherBuild/Build/Products/Release-iphoneos/"
 
+          if [ ! -d "$APP_PATH" ]; then
+            echo "::error::Feather.app not found"
+            find "$RUNNER_TEMP/FeatherBuild" -name "*.app" -print
+            exit 1
+          fi
+
+          echo "Copying Feather.app..."
           mkdir -p output/Payload
-          cp -R "$APP_PATH" output/Payload/Feather.app
 
-          codesign --force --sign - --timestamp=none \
+          /usr/bin/ditto \
+            "$APP_PATH" \
             output/Payload/Feather.app
 
-          ditto -c -k --sequesterRsrc --keepParent \
+          echo "Verifying app bundle..."
+          test -f output/Payload/Feather.app/Info.plist
+
+          EXECUTABLE=$(/usr/libexec/PlistBuddy \
+            -c 'Print :CFBundleExecutable' \
+            output/Payload/Feather.app/Info.plist)
+
+          test -f "output/Payload/Feather.app/$EXECUTABLE"
+
+          echo "Creating unsigned IPA..."
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent \
             output/Payload \
             output/Feather-Payload-Debug-Unsigned.ipa
 
+          echo "Verifying IPA..."
+          unzip -t output/Feather-Payload-Debug-Unsigned.ipa
+
+          echo "Final IPA:"
           ls -lh output/Feather-Payload-Debug-Unsigned.ipa
+
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
