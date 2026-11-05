@@ -1,0 +1,55 @@
+name: Feather Payload Debug IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build unsigned IPA
+    runs-on: macos-26
+    timeout-minutes: 60
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout source and submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Select Xcode 26.3
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.3.0.app
+          xcodebuild -version
+
+      - name: Build Feather for iPhone
+        run: |
+          xcodebuild \
+            -project Feather.xcodeproj \
+            -scheme Feather \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/FeatherBuild" \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=NO \
+            build
+
+      - name: Package IPA
+        run: |
+          APP_PATH="$RUNNER_TEMP/FeatherBuild/Build/Products/Release-iphoneos/Feather.app"
+          test -d "$APP_PATH"
+          mkdir -p output/Payload
+          cp -R "$APP_PATH" output/Payload/Feather.app
+          codesign --force --sign - --timestamp=none output/Payload/Feather.app
+          ditto -c -k --sequesterRsrc --keepParent output/Payload output/Feather-Payload-Debug-Unsigned.ipa
+          /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' output/Payload/Feather.app/Info.plist
+          ls -lh output/Feather-Payload-Debug-Unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Feather-Payload-Debug-Unsigned
+          path: output/Feather-Payload-Debug-Unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14

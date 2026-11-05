@@ -19,6 +19,7 @@ struct InstallPreviewView: View {
 	@AppStorage("Feather.serverMethod") private var _serverMethod: Int = 0
 	@State private var _isWebviewPresenting = false
 	@State private var progressTask: Task<Void, Never>?
+	@State private var _currentTime = Date()
 	
 	var app: AppInfoPresentable
 	@StateObject var viewModel: InstallerStatusViewModel
@@ -46,6 +47,7 @@ struct InstallPreviewView: View {
 		
 		ZStack {
 			InstallProgressView(app: app, viewModel: viewModel)
+				.offset(y: _isSendingPayload ? -25 : 0)
 			_status()
 			_button()
 		}
@@ -92,6 +94,9 @@ struct InstallPreviewView: View {
 			}
 		}
 		.onAppear(perform: _install)
+		.onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { now in
+			_currentTime = now
+		}
 		
 		#if !targetEnvironment(macCatalyst)
 		.onAppear {
@@ -111,11 +116,43 @@ struct InstallPreviewView: View {
 	
 	@ViewBuilder
 	private func _status() -> some View {
-		Label(viewModel.statusLabel, systemImage: viewModel.statusImage)
+		VStack(alignment: .leading, spacing: 8) {
+			Label(viewModel.statusLabel, systemImage: viewModel.statusImage)
+			if _isSendingPayload {
+				if installer.payloadTotalBytes > 0 {
+					ProgressView(value: min(Double(installer.payloadBytesSent) / Double(installer.payloadTotalBytes), 1.0))
+						.tint(.accentColor)
+					HStack(spacing: 6) {
+						Text(String(format: "%.1f / %.1f MB", Double(installer.payloadBytesSent) / 1_000_000, Double(installer.payloadTotalBytes) / 1_000_000))
+						Spacer(minLength: 4)
+						Text("\(Int(100.0 * Double(installer.payloadBytesSent) / Double(installer.payloadTotalBytes)))%")
+						Text(String(format: "%.1f MB/s", _idleSeconds > 3 ? 0 : installer.payloadBytesPerSecond / 1_000_000))
+						if _idleSeconds >= 5 {
+							Text("⚠︎ \(_idleSeconds)s")
+						}
+					}
+					.font(.system(.caption2, design: .monospaced))
+					.foregroundStyle(.secondary)
+				} else {
+					Text("Preparazione del trasferimento…")
+						.font(.caption)
+						.foregroundStyle(.secondary)
+				}
+			}
+		}
 			.padding()
-			.labelStyle(.titleAndIcon)
 			.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
 			.animation(.smooth, value: viewModel.statusImage)
+	}
+
+	private var _isSendingPayload: Bool {
+		if case .sendingPayload = viewModel.status { return true }
+		return false
+	}
+
+	private var _idleSeconds: Int {
+		guard let lastActivity = installer.payloadLastActivity else { return 0 }
+		return max(0, Int(_currentTime.timeIntervalSince(lastActivity)))
 	}
 	
 	@ViewBuilder
