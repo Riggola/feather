@@ -1,3 +1,4 @@
+
 name: Feather Payload Debug IPA
 
 on:
@@ -8,6 +9,7 @@ jobs:
     name: Build unsigned IPA
     runs-on: macos-26
     timeout-minutes: 60
+
     permissions:
       contents: read
 
@@ -17,10 +19,20 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Select Xcode 26.3
+      - name: Select Xcode 26.2
         run: |
-          sudo xcode-select -s /Applications/Xcode_26.3.0.app
+          sudo xcode-select -s /Applications/Xcode_26.2.app
           xcodebuild -version
+
+      - name: Resolve Swift packages
+        run: |
+          xcodebuild \
+            -resolvePackageDependencies \
+            -project Feather.xcodeproj \
+            -scheme Feather \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/FeatherPackages" \
+            -scmProvider system \
+            -skipPackagePluginValidation
 
       - name: Build Feather for iPhone
         run: |
@@ -30,6 +42,8 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -derivedDataPath "$RUNNER_TEMP/FeatherBuild" \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/FeatherPackages" \
+            -disableAutomaticPackageResolution \
             -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO \
             ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=NO \
@@ -38,12 +52,23 @@ jobs:
       - name: Package IPA
         run: |
           APP_PATH="$RUNNER_TEMP/FeatherBuild/Build/Products/Release-iphoneos/Feather.app"
+
           test -d "$APP_PATH"
+
           mkdir -p output/Payload
           cp -R "$APP_PATH" output/Payload/Feather.app
-          codesign --force --sign - --timestamp=none output/Payload/Feather.app
-          ditto -c -k --sequesterRsrc --keepParent output/Payload output/Feather-Payload-Debug-Unsigned.ipa
-          /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' output/Payload/Feather.app/Info.plist
+
+          codesign --force --sign - --timestamp=none \
+            output/Payload/Feather.app
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            output/Payload \
+            output/Feather-Payload-Debug-Unsigned.ipa
+
+          /usr/libexec/PlistBuddy \
+            -c 'Print CFBundleIdentifier' \
+            output/Payload/Feather.app/Info.plist
+
           ls -lh output/Feather-Payload-Debug-Unsigned.ipa
 
       - name: Upload IPA artifact
