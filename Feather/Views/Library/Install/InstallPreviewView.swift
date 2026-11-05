@@ -119,6 +119,15 @@ struct InstallPreviewView: View {
 		VStack(alignment: .leading, spacing: 8) {
 			Label(viewModel.statusLabel, systemImage: viewModel.statusImage)
 			if _isSendingPayload {
+				Text("Fase: \(installer.payloadPhase)")
+					.font(.system(.caption2, design: .monospaced))
+					.foregroundStyle(.secondary)
+				Text("Richieste: \(installer.payloadRequestCount) | \(installer.payloadRequestInfo)")
+					.font(.system(.caption2, design: .monospaced))
+					.foregroundStyle(.secondary)
+				Text(String(format: "Letti: %.2f MB | Scritti: %.2f MB", Double(installer.payloadBytesRead) / 1_000_000, Double(installer.payloadBytesSent) / 1_000_000))
+					.font(.system(.caption2, design: .monospaced))
+					.foregroundStyle(.secondary)
 				if installer.payloadTotalBytes > 0 {
 					ProgressView(value: min(Double(installer.payloadBytesSent) / Double(installer.payloadTotalBytes), 1.0))
 						.tint(.accentColor)

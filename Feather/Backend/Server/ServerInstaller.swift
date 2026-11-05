@@ -30,6 +30,10 @@ class ServerInstaller: Identifiable, ObservableObject {
 	@Published private(set) var payloadTotalBytes: Int64 = 0
 	@Published private(set) var payloadBytesPerSecond: Double = 0
 	@Published private(set) var payloadLastActivity: Date?
+	@Published private(set) var payloadPhase: String = "IN ATTESA"
+	@Published private(set) var payloadBytesRead: Int64 = 0
+	@Published private(set) var payloadRequestCount: Int = 0
+	@Published private(set) var payloadRequestInfo: String = ""
 
 	init(app: AppInfoPresentable, viewModel: InstallerStatusViewModel) throws {
 		self.app = app
@@ -70,6 +74,7 @@ class ServerInstaller: Identifiable, ObservableObject {
 					return Response(status: .notFound)
 				}
 				
+				self._notePayloadRequest(req)
 				self._updateStatus(.sendingPayload)
 				return self._streamPayload(at: packageUrl, for: req)
 			case "/install":
@@ -96,10 +101,32 @@ class ServerInstaller: Identifiable, ObservableObject {
 		}
 	}
 
+	private func _setPayloadPhase(_ phase: String) {
+		DispatchQueue.main.async {
+			self.payloadPhase = phase
+			self.payloadLastActivity = Date()
+		}
+	}
+
+	private func _notePayloadRequest(_ req: Request) {
+		let method = String(describing: req.method)
+		let range = req.headers.first(name: "Range") ?? "none"
+		DispatchQueue.main.async {
+			self.payloadRequestCount += 1
+			self.payloadRequestInfo = "\(method), Range: \(range)"
+			self.payloadPhase = "RICHIESTA HTTP RICEVUTA"
+			self.payloadBytesRead = 0
+			self.payloadBytesSent = 0
+			self.payloadBytesPerSecond = 0
+			self.payloadLastActivity = Date()
+		}
+	}
+
 	/// Preserve Vapor's HTTP headers and byte-range handling while counting the
 	/// bytes accepted by the response writer. These are NOT network ACKs from iOS.
 	private func _streamPayload(at url: URL, for req: Request) -> Response {
 		let response = req.fileio.streamFile(at: url.path)
+		_setPayloadPhase("RISPOSTA HTTP PREPARATA")
 		guard response.status == .ok || response.status == .partialContent else {
 			return response
 		}
@@ -140,10 +167,13 @@ class ServerInstaller: Identifiable, ObservableObject {
 		}
 
 		response.body = .init(stream: { [weak self] writer in
+			self?._setPayloadPhase("WRITER HTTP AVVIATO")
 			let handle: NIOFileHandle
 			do {
 				handle = try NIOFileHandle(path: url.path)
+				self?._setPayloadPhase("FILE IPA APERTO")
 			} catch {
+				self?._setPayloadPhase("ERRORE APERTURA IPA")
 				writer.write(.error(error), promise: nil)
 				self?._finishPayload(.failure(error))
 				return
@@ -157,10 +187,16 @@ class ServerInstaller: Identifiable, ObservableObject {
 				chunkSize: 128 * 1024,
 				allocator: req.byteBufferAllocator,
 				eventLoop: req.eventLoop
-			) { chunk in
+			) { [weak self] chunk in
 				let byteCount = chunk.readableBytes
-				return writer.write(.buffer(chunk)).map {
+				DispatchQueue.main.async {
+					self?.payloadBytesRead += Int64(byteCount)
+					self?.payloadPhase = "BLOCCO LETTO, SCRITTURA IN CORSO"
+					self?.payloadLastActivity = Date()
+				}
+				return writer.write(.buffer(chunk)).map { [weak self] in
 					tracker.record(byteCount)
+					self?._setPayloadPhase("SCRITTURA HTTP COMPLETATA")
 				}
 			}
 
@@ -169,8 +205,10 @@ class ServerInstaller: Identifiable, ObservableObject {
 				switch result {
 				case .success:
 					tracker.finish()
+					self?._setPayloadPhase("FINE LETTURA, CHIUSURA STREAM")
 					writer.write(.end, promise: nil)
 				case .failure(let error):
+					self?._setPayloadPhase("ERRORE LETTURA/SCRITTURA: \(error.localizedDescription)")
 					writer.write(.error(error), promise: nil)
 				}
 				self?._finishPayload(result)
