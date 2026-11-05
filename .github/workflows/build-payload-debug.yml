@@ -24,11 +24,22 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.2.app
           xcodebuild -version
 
+      - name: Reset Swift package resolution
+        run: |
+          echo "Existing Package.resolved files:"
+          find . -name Package.resolved -print
+
+          echo "Removing resolved files for this CI run:"
+          find . -name Package.resolved -type f -delete
+
+          rm -rf "$HOME/Library/Caches/org.swift.swiftpm"
+          rm -rf "$RUNNER_TEMP/FeatherPackages"
+
       - name: Resolve Swift packages
         run: |
           xcodebuild \
             -resolvePackageDependencies \
-            -project Feather.xcodeproj \
+            -workspace Feather.xcworkspace \
             -scheme Feather \
             -clonedSourcePackagesDirPath "$RUNNER_TEMP/FeatherPackages" \
             -scmProvider system \
@@ -37,7 +48,7 @@ jobs:
       - name: Build Feather for iPhone
         run: |
           xcodebuild \
-            -project Feather.xcodeproj \
+            -workspace Feather.xcworkspace \
             -scheme Feather \
             -configuration Release \
             -destination 'generic/platform=iOS' \
@@ -64,10 +75,6 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent \
             output/Payload \
             output/Feather-Payload-Debug-Unsigned.ipa
-
-          /usr/libexec/PlistBuddy \
-            -c 'Print CFBundleIdentifier' \
-            output/Payload/Feather.app/Info.plist
 
           ls -lh output/Feather-Payload-Debug-Unsigned.ipa
 
